@@ -5,8 +5,9 @@ from .labels import LABELS
 
 
 class NeedDetector:
-    def __init__(self, known_faces_folder: str):
+    def __init__(self, known_faces_folder: str, threshold: float = 0.02):
         self.known_faces_folder = known_faces_folder
+        self.threshold = threshold
         self.known_data = []
         self._load_known_faces()
 
@@ -23,25 +24,24 @@ class NeedDetector:
         image = cv2.resize(image, (200, 200))
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         gray = gray.astype("float32") / 255.0
+
         return gray
 
     def _load_known_faces(self):
         """
-        Load all reference images from known_faces folder.
+        Load all known reference images from folder.
         """
         if not os.path.exists(self.known_faces_folder):
-            raise FileNotFoundError(
-                f"Known faces folder not found: {self.known_faces_folder}"
-            )
+            raise FileNotFoundError(f"Known faces folder not found: {self.known_faces_folder}")
 
         for filename in sorted(os.listdir(self.known_faces_folder)):
             if not filename.lower().endswith((".jpg", ".jpeg", ".png")):
                 continue
 
             file_path = os.path.join(self.known_faces_folder, filename)
-            processed = self._preprocess_image(file_path)
+            processed_img = self._preprocess_image(file_path)
 
-            if processed is None:
+            if processed_img is None:
                 print(f"Warning: Could not load image: {filename}")
                 continue
 
@@ -50,7 +50,7 @@ class NeedDetector:
             self.known_data.append({
                 "filename": filename,
                 "label": label,
-                "image": processed
+                "image": processed_img
             })
 
         if len(self.known_data) == 0:
@@ -58,8 +58,8 @@ class NeedDetector:
 
     def _calculate_score(self, img1, img2):
         """
-        Lower score = better match
-        Uses Mean Squared Error.
+        Calculate similarity using Mean Squared Error (MSE).
+        Lower score = better match.
         """
         diff = (img1 - img2) ** 2
         mse = np.mean(diff)
@@ -67,17 +67,19 @@ class NeedDetector:
 
     def predict_need(self, test_image_path: str):
         """
-        Compare test image with all known images and return best match.
+        Predict the need by comparing uploaded image with known images.
+
         Returns:
             predicted_label, matched_filename, score
         """
+
         if not os.path.exists(test_image_path):
-            return "Test image not found", None, None
+            return "File not found ❌", None, None
 
         test_img = self._preprocess_image(test_image_path)
 
         if test_img is None:
-            return "Could not read test image", None, None
+            return "Invalid image ❌", None, None
 
         best_score = float("inf")
         best_label = None
@@ -90,5 +92,11 @@ class NeedDetector:
                 best_score = score
                 best_label = item["label"]
                 best_filename = item["filename"]
+
+        # Threshold check:
+        # If uploaded image is not close enough to any known image,
+        # return "No matching face found"
+        if best_score > self.threshold:
+            return "No matching face found ❌", None, best_score
 
         return best_label, best_filename, best_score
